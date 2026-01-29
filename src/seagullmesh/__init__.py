@@ -839,6 +839,68 @@ class Mesh3:
                 vcm.pmap, ecm.pmap, fpm.pmap, flagged.pmap
             )
 
+    def remesh_adaptive_full(
+            self,
+            vertex_sizing_map: str | PropertyMap[Vertex, float],
+            n_iter: int = 1,
+            faces: Faces | None = None,
+            vertex_constrained: str | PropertyMap[Vertex, bool] = '_vcm',
+            edge_constrained: str | PropertyMap[Edge, bool] = '_ecm',
+    ) -> None:
+        """Performs adaptive isotropic remeshing with a custom per-vertex sizing field
+
+        Uses a per-vertex sizing map to control target edge lengths throughout the mesh.
+        The sizing map should contain the desired edge length at each vertex.
+
+        Args:
+            vertex_sizing_map: Property map containing target edge length at each vertex
+            n_iter: Number of iterations
+            faces: Subset of faces to remesh (default: all faces)
+            vertex_constrained: Boolean property map marking constrained vertices
+            edge_constrained: Boolean property map marking constrained edges
+        """
+        if faces is None:
+            faces = self.faces
+        
+        if isinstance(vertex_sizing_map, str):
+            vertex_sizing_map = self.vertex_data.get(vertex_sizing_map)
+        
+        with self.vertex_data.get_or_temp(vertex_constrained, temp_name='_vcm', default=False) as vcm:
+            with self.edge_data.get_or_temp(edge_constrained, temp_name='_ecm', default=False) as ecm:
+                sgm.meshing.adaptive_isotropic_remeshing_full(
+                    self.mesh, faces.indices, vertex_sizing_map.pmap, n_iter, vcm.pmap, ecm.pmap)
+
+    def remesh_delaunay_full(
+            self,
+            vertex_sizing_map: str | PropertyMap[Vertex, float],
+            facet_angle: float = 25.0,
+            facet_distance: float = 0.1,
+            features_angle_bound: float = 60.0,
+            protect_constraints: bool = False,
+            edge_constrained: str | PropertyMap[Edge, bool] = '_ecm',
+    ) -> None:
+        """Performs Delaunay remeshing with a custom sizing field for CFD grading
+
+        Uses a per-vertex sizing map that is spatially interpolated across the surface
+        to control facet and edge sizes. This is ideal for CFD meshes where you need
+        smooth grading (e.g., 25m near terrain to 725m in the far field).
+
+        Args:
+            vertex_sizing_map: Property map containing target element size at each vertex
+            facet_angle: Lower bound for facet angles in degrees (default: 25.0)
+            facet_distance: Upper bound for facet distance to input (default: 0.1)
+            features_angle_bound: Lower bound for sharp feature angles in degrees (default: 60.0)
+            protect_constraints: Whether to protect constrained edges (default: False)
+            edge_constrained: Boolean property map marking constrained edges
+        """
+        if isinstance(vertex_sizing_map, str):
+            vertex_sizing_map = self.vertex_data.get(vertex_sizing_map)
+        
+        with self.edge_data.get_or_temp(edge_constrained, temp_name='_ecm', default=False) as ecm:
+            sgm.meshing.remesh_delaunay_full(
+                self.mesh, vertex_sizing_map.pmap, facet_angle, facet_distance,
+                features_angle_bound, protect_constraints, ecm.pmap)
+
     def split_long_edges(
             self,
             edges: Edges,
