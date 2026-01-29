@@ -4,6 +4,22 @@ import sys, os, glob, re
 import setuptools
 
 
+here = os.path.dirname(os.path.abspath(__file__))
+
+
+def _normalize_cgal_inc(path: str) -> str:
+    """CGAL expects the *include root* (containing the CGAL/ dir) on -I.
+
+    Passing .../include/CGAL triggers CGAL's include-path guard.
+    """
+    if not path:
+        return path
+    path = os.path.normpath(os.path.abspath(path))
+    if os.path.basename(path) == 'CGAL':
+        return os.path.dirname(path)
+    return path
+
+
 class get_pybind_include(object):
     """Helper class to determine the pybind11 include path
     The purpose of this class is to postpone importing pybind11
@@ -18,8 +34,9 @@ class get_pybind_include(object):
         return pybind11.get_include(self.user)
 
 include_dirs = [
-    "./include/",
-    "./src/docs/",
+    os.path.join(here, "include"),
+    os.path.join(here, "src"),
+    os.path.join(here, "src", "docs"),
     # Path to pybind11 headers
     get_pybind_include(),
     get_pybind_include(user=True),
@@ -33,11 +50,10 @@ if not conda_prefix:
     conda_prefix = os.getenv('MINICONDAPATH')
 
 if conda_prefix:
-    cgal_include = os.path.join(conda_prefix, 'include', 'CGAL')
-
-    if not os.path.exists(cgal_include):
-        cgal_include = os.path.join(conda_prefix, 'Library', 'include', 'CGAL')
-        include_dirs.append(os.path.join(conda_prefix, 'Library', 'include'))
+    cgal_include_root = os.path.join(conda_prefix, 'include')
+    if not os.path.exists(os.path.join(cgal_include_root, 'CGAL')):
+        cgal_include_root = os.path.join(conda_prefix, 'Library', 'include')
+        include_dirs.append(cgal_include_root)
 
     eigen_include = os.path.join(conda_prefix, 'include', 'eigen3')
     if not os.path.exists(eigen_include):
@@ -48,15 +64,21 @@ if conda_prefix:
         include_dirs.append(eigen_include)
     else:
         print(f"Eigen not found")
-
 elif os.path.exists('/usr/include/CGAL/'):
-    cgal_include = '/usr/include/CGAL/'
+    cgal_include_root = '/usr/include'
 else:
-    cgal_include = '/usr/local/include/CGAL/'
+    cgal_include_root = '/usr/local/include'
+
+cgal_inc_env = os.getenv('CGAL_INC')
+if cgal_inc_env:
+    cgal_include_root = _normalize_cgal_inc(cgal_inc_env)
+
+if cgal_include_root:
+    include_dirs.append(cgal_include_root)
 
 cgal_version = None
-if os.path.exists(os.path.join(cgal_include, 'version.h')):
-    with open(os.path.join(cgal_include, 'version.h'), 'r') as f:
+if os.path.exists(os.path.join(cgal_include_root, 'CGAL', 'version.h')):
+    with open(os.path.join(cgal_include_root, 'CGAL', 'version.h'), 'r') as f:
         m = re.search(r'#define\s+CGAL_VERSION\s+([\d\.]+)', f.read())
         if m:
             cgal_version = tuple(map(int, m.group(1).split('.')))
