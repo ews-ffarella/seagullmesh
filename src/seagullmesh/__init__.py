@@ -472,6 +472,12 @@ class Mesh3:
         yield self.edge_data
         yield self.halfedge_data
 
+    def _invalidate_cached_topology(self) -> None:
+        self.__dict__.pop('vertex_point_map', None)
+        self.__dict__.pop('_vertex_index_map', None)
+        for data in self.iter_meshdata():
+            data._data.clear()  # type: ignore[attr-defined]
+
     def copy(self) -> Mesh3:
         """Deep-copy the mesh and all its properties"""
         out = Mesh3(sgm.mesh.Mesh3(self.mesh))
@@ -843,9 +849,14 @@ class Mesh3:
             self,
             vertex_sizing_map: str | PropertyMap[Vertex, float],
             n_iter: int = 1,
-            faces: Faces | None = None,
+            collapse_constraints=True,
+            protect_constraints=False,
+            do_project=True,
             vertex_constrained: str | PropertyMap[Vertex, bool] = '_vcm',
             edge_constrained: str | PropertyMap[Edge, bool] = '_ecm',
+            face_patch_map: str | PropertyMap[Face, int] = '_fpm',
+            flagged: str | PropertyMap[Vertex, bool] = '_flagged',
+            faces: Faces | None = None,
     ) -> None:
         """Performs adaptive isotropic remeshing with a custom per-vertex sizing field
 
@@ -855,20 +866,32 @@ class Mesh3:
         Args:
             vertex_sizing_map: Property map containing target edge length at each vertex
             n_iter: Number of iterations
-            faces: Subset of faces to remesh (default: all faces)
+            collapse_constraints: Allow edge collapse
+            protect_constraints: Protect constrained edges from modification
+            do_project: Project vertices back to original surface
             vertex_constrained: Boolean property map marking constrained vertices
             edge_constrained: Boolean property map marking constrained edges
+            face_patch_map: Face patch map for preserving regions
+            flagged: Vertex flag map
+            faces: Subset of faces to remesh (default: all faces)
         """
         if faces is None:
             faces = self.faces
         
         if isinstance(vertex_sizing_map, str):
-            vertex_sizing_map = self.vertex_data.get(vertex_sizing_map)
+            vertex_sizing_map = self.vertex_data[vertex_sizing_map]
         
-        with self.vertex_data.get_or_temp(vertex_constrained, temp_name='_vcm', default=False) as vcm:
-            with self.edge_data.get_or_temp(edge_constrained, temp_name='_ecm', default=False) as ecm:
-                sgm.meshing.adaptive_isotropic_remeshing_full(
-                    self.mesh, faces.indices, vertex_sizing_map.pmap, n_iter, vcm.pmap, ecm.pmap)
+        with (
+            self.vertex_data.get_or_temp(vertex_constrained, temp_name='_vcm', default=False) as vcm,
+            self.edge_data.get_or_temp(edge_constrained, temp_name='_ecm', default=False) as ecm,
+            self.face_data.get_or_temp(face_patch_map, temp_name='_fpm', default=0, dtype='uint32') as fpm,
+            self.vertex_data.get_or_temp(flagged, temp_name='_flagged', default=False) as flagged,
+        ):
+            sgm.meshing.adaptive_isotropic_remeshing_full(
+                self.mesh, faces.indices, vertex_sizing_map.pmap, n_iter,
+                collapse_constraints, protect_constraints, do_project,
+                vcm.pmap, ecm.pmap, fpm.pmap, flagged.pmap
+            )
 
     def remesh_delaunay_full(
             self,
@@ -894,12 +917,15 @@ class Mesh3:
             edge_constrained: Boolean property map marking constrained edges
         """
         if isinstance(vertex_sizing_map, str):
-            vertex_sizing_map = self.vertex_data.get(vertex_sizing_map)
-        
+            vertex_sizing_map = self.vertex_data[vertex_sizing_map]
+
         with self.edge_data.get_or_temp(edge_constrained, temp_name='_ecm', default=False) as ecm:
-            sgm.meshing.remesh_delaunay_full(
+            new_mesh = sgm.meshing.remesh_delaunay_full(
                 self.mesh, vertex_sizing_map.pmap, facet_angle, facet_distance,
                 features_angle_bound, protect_constraints, ecm.pmap)
+
+        self.mesh = new_mesh
+        self._invalidate_cached_topology()
 
     def split_long_edges(
             self,
