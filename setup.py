@@ -134,6 +134,14 @@ if sys.platform == 'darwin' and glob.glob('/usr/local/lib/libboost*-mt*'):
 else:
     boost_mt = False
 
+# Set library_dirs for Linux systems if not already set
+if library_dirs is None and sys.platform.startswith('linux'):
+    library_dirs = []
+    # Add common Linux library paths
+    for path in ['/usr/lib', '/usr/local/lib', '/usr/lib/x86_64-linux-gnu', '/usr/lib64']:
+        if os.path.exists(path):
+            library_dirs.append(path)
+
 ext_modules = [
     Extension(
         'seagullmesh._seagullmesh',
@@ -167,6 +175,7 @@ ext_modules = [
                    'boost_atomic-mt' if boost_mt else 'boost_atomic',
                    'boost_system',
                    'boost_date_time',
+                   'ceres',
                    'boost_chrono'],
         language='c++'
     ),
@@ -241,7 +250,9 @@ class BuildExt(build_ext):
             if 'CGAL_DEBUG' not in os.environ:
                 opts.append('/DCGAL_DEBUG=1')
 
-            # opts.append('/DCGAL_PMP_REMOVE_SELF_INTERSECTION_OUTPUT=1')
+        opts.append('-DCGAL_PMP_USE_CERES_SOLVER=1')
+        link_opts.append('-lceres')
+        # opts.append('/DCGAL_PMP_REMOVE_SELF_INTERSECTION_OUTPUT=1')
 
         for ext in self.extensions:
             ext.extra_compile_args = opts
