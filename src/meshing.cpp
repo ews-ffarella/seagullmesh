@@ -77,20 +77,30 @@ struct PerVertexSizingOnMap {
 
     FT at(const V v, const Mesh3&) const { return sizes[v]; }
 
+    // Edges too long with respect to the local target edge length are split in two, 
+    // while edges that are too short are collapsed.
+
     std::optional<FT> is_too_long(const V va, const V vb, const Mesh3& mesh) const {
+        // returns the ratio of the current edge squared length and the local target edge squared length 
+        // between the points of va and vb in case the current edge is too long, 
+        // and std::nullopt otherwise (used for triggering edge splits and preventing some edge collapses). 
         const double target = 0.5 * (sizes[va] + sizes[vb]);
         const double sq = CGAL::squared_distance(mesh.point(va), mesh.point(vb));
-        const double target_sq = target * target;
+        const double threshold = 4.0 / 3.0;  // 1.33 - standard CGAL split threshold
+        const double target_sq = (threshold * target) * (threshold * target);
         if (sq > target_sq) return sq / target_sq;
         return std::nullopt;
     }
 
     std::optional<FT> is_too_short(const H h, const Mesh3& mesh) const {
+        // returns the ratio of the squared length of h and the local target edge squared length if it is too short, 
+        // and std::nullopt otherwise (used for triggering edge collapses). 
         const V s = source(h, mesh);
         const V t = target(h, mesh);
         const double target = 0.5 * (sizes[s] + sizes[t]);
         const double sq = CGAL::squared_distance(mesh.point(s), mesh.point(t));
-        const double target_sq = target * target;
+        const double threshold = 4.0 / 5.0;  // 0.8 - standard CGAL collapse threshold
+        const double target_sq = (threshold * target) * (threshold * target);
         if (sq < target_sq) return sq / target_sq;
         return std::nullopt;
     }
@@ -278,6 +288,11 @@ void init_meshing(py::module &m) {
                 bool collapse_constraints,
                 bool protect_constraints,
                 bool do_project,
+                bool do_collapse,
+                bool do_flip,
+                bool do_split,
+                unsigned int number_of_relaxation_steps,
+                bool relax_constraints,
                 VertBool& vertex_is_constrained_map,
                 EdgeBool& edge_is_constrained_map,
                 FaceIndex& face_patch_map,
@@ -292,6 +307,11 @@ void init_meshing(py::module &m) {
                 .collapse_constraints(collapse_constraints)
                 .protect_constraints(protect_constraints)
                 .do_project(do_project)
+                .do_collapse(do_collapse)
+                .do_flip(do_flip)
+                .do_split(do_split)
+                .number_of_relaxation_steps(number_of_relaxation_steps)
+                .relax_constraints(relax_constraints)
                 .vertex_is_constrained_map(vertex_is_constrained_map)
                 .edge_is_constrained_map(edge_is_constrained_map)
                 .face_patch_map(face_patch_map)

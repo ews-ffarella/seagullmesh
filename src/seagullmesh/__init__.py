@@ -852,6 +852,11 @@ class Mesh3:
             collapse_constraints=True,
             protect_constraints=False,
             do_project=True,
+            do_collapse=True,
+            do_flip=True,
+            do_split=True,
+            number_of_relaxation_steps: int = 1,
+            relax_constraints=False,
             vertex_constrained: str | PropertyMap[Vertex, bool] = '_vcm',
             edge_constrained: str | PropertyMap[Edge, bool] = '_ecm',
             face_patch_map: str | PropertyMap[Face, int] = '_fpm',
@@ -869,6 +874,15 @@ class Mesh3:
             collapse_constraints: Allow edge collapse
             protect_constraints: Protect constrained edges from modification
             do_project: Project vertices back to original surface
+            do_collapse: Whether edges that are too short with respect to the given sizing are collapsed 
+            (default: True)
+            do_flip: Whether edge flips are performed to improve shape and valence  (default: True)
+            do_split: Whether edges that are too long with respect to the given sizing are split   (default: True)
+            number_of_relaxation_steps: Number of iterations of tangential relaxation that are performed 
+                at each iteration of the remeshing process  (default: 1)
+            relax_constraints: If true, the end vertices of the edges set as constrained in 
+                edge_is_constrained_map and boundary edges move along the constrained polylines 
+                they belong to.  (default: False)
             vertex_constrained: Boolean property map marking constrained vertices
             edge_constrained: Boolean property map marking constrained edges
             face_patch_map: Face patch map for preserving regions
@@ -890,6 +904,8 @@ class Mesh3:
             sgm.meshing.adaptive_isotropic_remeshing_full(
                 self.mesh, faces.indices, vertex_sizing_map.pmap, n_iter,
                 collapse_constraints, protect_constraints, do_project,
+                do_collapse, do_flip, do_split,
+                number_of_relaxation_steps, relax_constraints,
                 vcm.pmap, ecm.pmap, fpm.pmap, flagged.pmap
             )
 
