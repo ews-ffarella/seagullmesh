@@ -8,6 +8,6 @@ CGAL_INC = /home/ews-ffarella/extern/CGAL-6.1.1/include
 
 .PHONY: wheel
 wheel:
-	CGAL_INC=$(CGAL_INC) uv run python setup.py build_ext --inplace --parallel=$(NPROCS) 
-	CGAL_INC=$(CGAL_INC) uv run python setup.py bdist_wheel	
+	CGAL_INC=$(CGAL_INC) ../../.venv/bin/python setup.py build_ext --inplace --parallel=$(NPROCS) 
+	CGAL_INC=$(CGAL_INC) ../../.venv/bin/python setup.py bdist_wheel	
 	@ls -lah ./dist/

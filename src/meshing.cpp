@@ -540,14 +540,23 @@ void init_meshing(py::module &m) {
                 return std::acos(dot);
             };
 
-            // Helper: check that both new triangles have positive area and
-            // normals roughly consistent with `up` (no inversion).
+            // Detect dominant normal orientation (up or down) by sampling
+            // face normals. VTK/pyvista meshes often have downward normals.
+            double orientation_sum = 0;
+            for (F f : mesh.faces()) {
+                Vector3 n = PMP::compute_face_normal(f, mesh);
+                orientation_sum += n * up_unit;
+            }
+            const double orient_sign = (orientation_sum >= 0) ? 1.0 : -1.0;
+
+            // Helper: check that both new triangles have non-degenerate area
+            // and normals consistent with the mesh's dominant orientation.
             auto faces_valid = [&](F f0, F f1) -> bool {
                 Vector3 n0 = PMP::compute_face_normal(f0, mesh);
                 Vector3 n1 = PMP::compute_face_normal(f1, mesh);
-                // A degenerate or inverted triangle will have a near-zero or
-                // negative dot product with up.
-                return (n0 * up_unit > 1e-8) && (n1 * up_unit > 1e-8);
+                // orient_sign flips the check when mesh normals point downward
+                return (orient_sign * (n0 * up_unit) > 1e-8)
+                    && (orient_sign * (n1 * up_unit) > 1e-8);
             };
 
             int total_flips = 0;
@@ -567,9 +576,14 @@ void init_meshing(py::module &m) {
                     // Skip boundary edges (one side has no face)
                     if (f0 == Mesh3::null_face() || f1 == Mesh3::null_face()) continue;
 
-                    // Current worst slope of the two adjacent faces
+                    // Current slopes of the two adjacent faces
                     double slope0 = face_slope(f0);
                     double slope1 = face_slope(f1);
+                    // Use sum-of-squared-slopes as the energy to minimize.
+                    // This avoids the "equalization" problem where max(A,B) criterion
+                    // redistributes slopes (e.g. 40°+20° → 35°+35° reduces max but
+                    // increases mean). Sum-of-squares penalizes steep faces more.
+                    double energy_before = slope0 * slope0 + slope1 * slope1;
                     double worst_before = std::max(slope0, slope1);
 
                     // Perform the flip (in-place, h now refers to the flipped edge)
@@ -588,13 +602,18 @@ void init_meshing(py::module &m) {
 
                     double slope0_new = face_slope(f0_new);
                     double slope1_new = face_slope(f1_new);
+                    double energy_after = slope0_new * slope0_new + slope1_new * slope1_new;
                     double worst_after = std::max(slope0_new, slope1_new);
 
-                    if (worst_after < worst_before - min_improvement_rad) {
+                    // Accept flip if:
+                    // 1) Sum-of-squared-slopes decreased (total energy reduction), AND
+                    // 2) The worst slope didn't get worse (don't create new steep faces)
+                    if (energy_after < energy_before - min_improvement_rad * min_improvement_rad
+                        && worst_after <= worst_before + 1e-6) {
                         // Beneficial flip — keep it
                         ++flips_this_pass;
                     } else {
-                        // Not enough improvement — revert
+                        // Not enough improvement or worst slope increased — revert
                         CGAL::Euler::flip_edge(h, mesh);
                     }
                 }
