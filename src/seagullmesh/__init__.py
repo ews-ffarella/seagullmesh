@@ -952,6 +952,44 @@ class Mesh3:
         with self.edge_data.get_or_temp(edge_is_constrained, temp_name='_ecm', default=False) as ecm:
             sgm.meshing.split_long_edges(self.mesh, edges.indices, target_edge_length, ecm.pmap)
 
+    def flip_edge(self, halfedge: Halfedge) -> None:
+        """Flip a single interior edge (must be shared by exactly 2 triangular faces).
+
+        The halfedge is modified in-place.
+        """
+        sgm.meshing.flip_edge(self.mesh, halfedge)
+
+    def flip_edges_to_minimize_slope(
+            self,
+            up: tuple[float, float, float] = (0.0, 0.0, 1.0),
+            max_passes: int = 10,
+            min_improvement_deg: float = 0.5,
+            edge_is_constrained: str | PropertyMap[Edge, bool] = '_ecm',
+    ) -> tuple[int, list[int]]:
+        """Greedily flip interior edges to minimize the maximum face slope.
+
+        For each interior non-constrained edge, checks if flipping reduces
+        max(slope(face_a), slope(face_b)). If the improvement exceeds
+        `min_improvement_deg` degrees, the flip is kept.
+
+        Args:
+            up: The "up" direction vector (default: z-up).
+            max_passes: Maximum number of full passes over all edges.
+            min_improvement_deg: Minimum slope improvement (degrees) to keep a flip.
+            edge_is_constrained: Property map or name; border edges are auto-constrained.
+
+        Returns:
+            (total_flips, flips_per_pass): Total flip count and per-pass breakdown.
+        """
+        min_improvement_rad = np.deg2rad(min_improvement_deg)
+        with self.edge_data.get_or_temp(edge_is_constrained, temp_name='_ecm', default=False) as ecm:
+            total, per_pass = sgm.meshing.flip_edges_to_minimize_slope(
+                self.mesh, ecm.pmap,
+                float(up[0]), float(up[1]), float(up[2]),
+                max_passes, min_improvement_rad,
+            )
+        return total, list(per_pass)
+
     def fair(self, verts: Vertices, continuity=0) -> bool:
         """Fair the specified mesh vertices"""
         return sgm.meshing.fair(self.mesh, verts.indices, continuity)

@@ -231,7 +231,7 @@ class BuildExt(build_ext):
     def initialize_options(self):
         super(BuildExt, self).initialize_options()
         self.debug = False
-        self.parallel = True
+        self.parallel = os.cpu_count()
 
     def build_extensions(self):
         ct = self.compiler.compiler_type
@@ -276,7 +276,7 @@ setup(
     long_description='',
     ext_modules=ext_modules,
     install_requires=['pybind11', 'numpy'],
-    setup_requires=['pybind11'],
+    # setup_requires=['pybind11'],
     cmdclass={'build_ext': BuildExt},
     zip_safe=False,
     packages=['seagullmesh'],

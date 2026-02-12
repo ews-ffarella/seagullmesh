@@ -24,6 +24,8 @@
 #include <CGAL/Polygon_mesh_processing/refine_mesh_at_isolevel.h>
 #include <CGAL/Polygon_mesh_processing/repair_self_intersections.h>
 #include <CGAL/Polygon_mesh_processing/surface_Delaunay_remeshing.h>
+#include <CGAL/Polygon_mesh_processing/compute_normal.h>
+#include <CGAL/boost/graph/Euler_operations.h>
 
 typedef Mesh3::Property_map<V, Point3>                      VertPoint;
 typedef Mesh3::Property_map<V, double>                      VertDouble;
@@ -498,6 +500,116 @@ void init_meshing(py::module &m) {
         ) {
             auto params = PMP::parameters::edge_is_constrained_map(edge_is_constrained_map);
             PMP::split_long_edges(edges.to_vector(), target_edge_length, mesh, params);
+        })
+        // ────────────────────────────────────────────────────────────────────
+        // Option A: Low-level single edge flip (CGAL::Euler::flip_edge)
+        // Precondition: the edge must be interior (shared by exactly 2 triangular faces).
+        // Returns the new halfedge after the flip.
+        // ────────────────────────────────────────────────────────────────────
+        .def("flip_edge", [](Mesh3& mesh, H h) {
+            CGAL::Euler::flip_edge(h, mesh);
+        })
+        // ────────────────────────────────────────────────────────────────────
+        // Option C: Greedy slope-minimizing edge flip kernel.
+        //
+        // For every interior, non-constrained edge, we check whether flipping
+        // it would reduce  max(slope(face_a), slope(face_b))  where slope is
+        // the angle between the face normal and `up`.  If the improvement
+        // exceeds `min_improvement_rad`, the flip is kept; otherwise it is
+        // reverted.  The process is repeated for at most `max_passes`.
+        //
+        // Returns the total number of flips performed across all passes.
+        // ────────────────────────────────────────────────────────────────────
+        .def("flip_edges_to_minimize_slope", [](
+            Mesh3& mesh,
+            EdgeBool& edge_is_constrained,
+            double up_x, double up_y, double up_z,
+            int max_passes,
+            double min_improvement_rad
+        ) -> py::tuple {
+            const Vector3 up(up_x, up_y, up_z);
+            const double up_len = std::sqrt(up * up);
+            const Vector3 up_unit = up / up_len;
+
+            // Helper: compute the slope angle (rad) of face f w.r.t. `up`.
+            // slope = acos( |dot(normal, up)| )  –  0 = flat, pi/2 = vertical
+            auto face_slope = [&](F f) -> double {
+                Vector3 n = PMP::compute_face_normal(f, mesh);
+                double dot = std::abs(n * up_unit);
+                dot = std::min(1.0, std::max(-1.0, dot));  // clamp for acos safety
+                return std::acos(dot);
+            };
+
+            // Helper: check that both new triangles have positive area and
+            // normals roughly consistent with `up` (no inversion).
+            auto faces_valid = [&](F f0, F f1) -> bool {
+                Vector3 n0 = PMP::compute_face_normal(f0, mesh);
+                Vector3 n1 = PMP::compute_face_normal(f1, mesh);
+                // A degenerate or inverted triangle will have a near-zero or
+                // negative dot product with up.
+                return (n0 * up_unit > 1e-8) && (n1 * up_unit > 1e-8);
+            };
+
+            int total_flips = 0;
+            std::vector<int> flips_per_pass;
+
+            for (int pass = 0; pass < max_passes; ++pass) {
+                int flips_this_pass = 0;
+
+                for (E e : mesh.edges()) {
+                    // Skip constrained (boundary) edges
+                    if (edge_is_constrained[e]) continue;
+
+                    H h = mesh.halfedge(e);
+                    F f0 = mesh.face(h);
+                    F f1 = mesh.face(mesh.opposite(h));
+
+                    // Skip boundary edges (one side has no face)
+                    if (f0 == Mesh3::null_face() || f1 == Mesh3::null_face()) continue;
+
+                    // Current worst slope of the two adjacent faces
+                    double slope0 = face_slope(f0);
+                    double slope1 = face_slope(f1);
+                    double worst_before = std::max(slope0, slope1);
+
+                    // Perform the flip (in-place, h now refers to the flipped edge)
+                    CGAL::Euler::flip_edge(h, mesh);
+
+                    // Identify new adjacent faces (h is still valid after flip)
+                    F f0_new = mesh.face(h);
+                    F f1_new = mesh.face(mesh.opposite(h));
+
+                    // Check validity (no degenerate / inverted triangles)
+                    if (!faces_valid(f0_new, f1_new)) {
+                        // Revert: flip back
+                        CGAL::Euler::flip_edge(h, mesh);
+                        continue;
+                    }
+
+                    double slope0_new = face_slope(f0_new);
+                    double slope1_new = face_slope(f1_new);
+                    double worst_after = std::max(slope0_new, slope1_new);
+
+                    if (worst_after < worst_before - min_improvement_rad) {
+                        // Beneficial flip — keep it
+                        ++flips_this_pass;
+                    } else {
+                        // Not enough improvement — revert
+                        CGAL::Euler::flip_edge(h, mesh);
+                    }
+                }
+
+                flips_per_pass.push_back(flips_this_pass);
+                total_flips += flips_this_pass;
+
+                // Convergence: no flips this pass → stop early
+                if (flips_this_pass == 0) break;
+            }
+
+            // Return (total_flips, flips_per_pass_list)
+            py::list py_passes;
+            for (int f : flips_per_pass) py_passes.append(f);
+            return py::make_tuple(total_flips, py_passes);
         })
     ;
 }
